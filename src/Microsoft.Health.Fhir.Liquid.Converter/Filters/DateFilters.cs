@@ -91,6 +91,11 @@ namespace Microsoft.Health.Fhir.Liquid.Converter
             return dateTimeObject.ToFhirString(outputTimeZoneHandling);
         }
 
+        public static string DateTimeFormat(DateTime dateTime, string format)
+        {
+            return dateTime.ToUniversalTime().ToString(format);
+        }
+
         public static string Now(string input, string format = "yyyy-MM-ddTHH:mm:ss.FFFZ")
         {
             return DateTime.UtcNow.ToString(format);

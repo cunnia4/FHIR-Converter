@@ -5,14 +5,17 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Health.Fhir.Liquid.Converter.Extensions;
 using Microsoft.Health.Fhir.Liquid.Converter.InputProcessors;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Microsoft.Health.Fhir.Liquid.Converter
 {
@@ -62,6 +65,11 @@ namespace Microsoft.Health.Fhir.Liquid.Converter
             return data == null ? null : JsonConvert.SerializeObject(data, Formatting.None);
         }
 
+        public static object FromJsonString(object data)
+        {
+            return data == null ? null : JToken.Parse(data.ToString()).ToObject();
+        }
+
         public static string Gzip(string data)
         {
             using var inputStream = new MemoryStream(Encoding.UTF8.GetBytes(data));
@@ -104,6 +112,21 @@ namespace Microsoft.Health.Fhir.Liquid.Converter
         {
             var bytes = Convert.FromBase64String(data);
             return Encoding.UTF8.GetString(bytes);
+        }
+
+        public static string RemoveCharFromEnd(string data, char c)
+        {
+            return data.TrimEnd(c);
+        }
+
+        public static string RegexReplace(string data, string pattern, string replacement)
+        {
+            return Regex.Replace(data, pattern, replacement);
+        }
+
+        public static bool StartsWith(string data, string prefix)
+        {
+            return data.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

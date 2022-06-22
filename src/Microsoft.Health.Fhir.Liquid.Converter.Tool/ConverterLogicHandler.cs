@@ -20,56 +20,46 @@ namespace Microsoft.Health.Fhir.Liquid.Converter.Tool
         private const string MetadataFileName = "metadata.json";
         private static readonly List<string> CcdaExtensions = new List<string> { ".ccda", ".xml" };
 
-        internal static void Convert(ConverterOptions options)
+        internal static async void Convert(ConverterOptions options)
         {
             if (!IsValidOptions(options))
             {
                 throw new InputParameterException("Invalid command-line options.");
             }
 
-            var dataType = GetDataTypes(options.TemplateDirectory);
-            var dataProcessor = CreateDataProcessor(dataType);
+            var metadata = GetTemplateMetadata(options.TemplateDirectory);
+            var dataType = MakeDataType(metadata);
+            var dataProcessor = CreateDataProcessor(dataType, metadata.ProcessorSettings);
             var templateProvider = CreateTemplateProvider(dataType, options.TemplateDirectory);
 
-            if (!string.IsNullOrEmpty(options.InputDataContent))
+            var traceInfo = CreateTraceInfo(dataType, options.IsTraceInfo);
+
+            var converter = new Converter(dataProcessor, templateProvider, options.RootTemplate, traceInfo);
+
+            if (!string.IsNullOrEmpty(options.InputDataFolder))
             {
-                ConvertSingleFile(dataProcessor, templateProvider, dataType, options.RootTemplate, options.InputDataContent, options.OutputDataFile, options.IsTraceInfo);
-            }
-            else if (!string.IsNullOrEmpty(options.InputDataFile))
-            {
-                var fileContent = File.ReadAllText(options.InputDataFile);
-                ConvertSingleFile(dataProcessor, templateProvider, dataType, options.RootTemplate, fileContent, options.OutputDataFile, options.IsTraceInfo);
-            }
-            else
-            {
-                ConvertBatchFiles(dataProcessor, templateProvider, dataType, options.RootTemplate, options.InputDataFolder, options.OutputDataFolder, options.IsTraceInfo);
+                // Convert an entire folder of files in batch
+                var files = GetInputFiles(dataType, options.InputDataFolder);
+                var outputFolder = Path.Join(options.OutputDataFolder, options.InputDataFolder);
+
+                converter.BatchFiles(files, outputFolder);
+            } else {
+                // Convert a single file
+                var fileContent = options.InputDataContent;
+
+                // If we have a filepath, retrieve the content
+                if (!string.IsNullOrEmpty(options.InputDataFile))
+                {
+                    fileContent = File.ReadAllText(options.InputDataFile);
+                }
+
+                converter.SingleFile(fileContent, options.OutputDataFile);
             }
 
             Console.WriteLine($"Conversion completed!");
         }
 
-        private static void ConvertSingleFile(IFhirConverter dataProcessor, ITemplateProvider templateProvider, DataType dataType, string rootTemplate, string inputContent, string outputFile, bool isTraceInfo)
-        {
-            var traceInfo = CreateTraceInfo(dataType, isTraceInfo);
-            var resultString = dataProcessor.Convert(inputContent, rootTemplate, templateProvider, traceInfo);
-            var result = new ConverterResult(ProcessStatus.OK, resultString, traceInfo);
-            SaveConverterResult(outputFile, result);
-        }
-
-        private static void ConvertBatchFiles(IFhirConverter dataProcessor, ITemplateProvider templateProvider, DataType dataType, string rootTemplate, string inputFolder, string outputFolder, bool isTraceInfo)
-        {
-            var files = GetInputFiles(dataType, inputFolder);
-            foreach (var file in files)
-            {
-                Console.WriteLine($"Processing {Path.GetFullPath(file)}");
-                var fileContent = File.ReadAllText(file);
-                var outputFileDirectory = Path.Join(outputFolder, Path.GetRelativePath(inputFolder, Path.GetDirectoryName(file)));
-                var outputFilePath = Path.Join(outputFileDirectory, Path.GetFileNameWithoutExtension(file) + ".json");
-                ConvertSingleFile(dataProcessor, templateProvider, dataType, rootTemplate, fileContent, outputFilePath, isTraceInfo);
-            }
-        }
-
-        private static DataType GetDataTypes(string templateDirectory)
+        private static Metadata GetTemplateMetadata(string templateDirectory)
         {
             if (!Directory.Exists(templateDirectory))
             {
@@ -84,22 +74,17 @@ namespace Microsoft.Health.Fhir.Liquid.Converter.Tool
 
             var content = File.ReadAllText(metadataPath);
             var metadata = JsonConvert.DeserializeObject<Metadata>(content);
-            if (Enum.TryParse<DataType>(metadata?.Type, ignoreCase: true, out var type))
-            {
-                return type;
-            }
 
-            throw new NotImplementedException($"The conversion from data type '{metadata?.Type}' to FHIR is not supported");
+            return metadata;
         }
 
-        private static IFhirConverter CreateDataProcessor(DataType dataType)
+        private static IFhirConverter CreateDataProcessor(DataType dataType, ProcessorSettings processorSettings)
         {
             return dataType switch
             {
-                DataType.Hl7v2 => new Hl7v2Processor(),
-                DataType.Ccda => new CcdaProcessor(),
-                DataType.Json => new JsonProcessor(),
-                DataType.Fhir => new FhirProcessor(),
+                DataType.Hl7v2 => new Hl7v2Processor(processorSettings),
+                DataType.Ccda => new CcdaProcessor(processorSettings),
+                DataType.Json => new JsonProcessor(processorSettings),
                 _ => throw new NotImplementedException($"The conversion from data type {dataType} to FHIR is not supported")
             };
         }
@@ -107,6 +92,16 @@ namespace Microsoft.Health.Fhir.Liquid.Converter.Tool
         private static ITemplateProvider CreateTemplateProvider(DataType dataType, string templateDirectory)
         {
             return new TemplateProvider(templateDirectory, dataType);
+        }
+
+        private static DataType MakeDataType(Metadata metadata)
+        {
+            if (Enum.TryParse<DataType>(metadata?.Type, ignoreCase: true, out var type))
+            {
+                return type;
+            }
+
+            throw new NotImplementedException($"The conversion from data type '{metadata?.Type}' to FHIR is not supported");
         }
 
         private static TraceInfo CreateTraceInfo(DataType dataType, bool isTraceInfo)
